@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::error::Error;
 
 use aoc_runner_derive::{aoc, aoc_generator};
@@ -34,6 +35,18 @@ pub fn part1(pairs: &[(u32, u32)]) -> u32 {
         .sum()
 }
 
+#[aoc(day1, part2)]
+pub fn part2(pairs: &[(u32, u32)]) -> u32 {
+    let (left, right): (Vec<_>, Vec<_>) = pairs.iter().cloned().unzip();
+    let mut right_counts: HashMap<u32, u32> = HashMap::new();
+    for b in right {
+        right_counts.entry(b).and_modify(|c| *c += 1).or_insert(1);
+    }
+    left.into_iter()
+        .map(|a| a * right_counts.get(&a).unwrap_or(&0))
+        .sum()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -58,5 +71,11 @@ mod tests {
     fn test_part1() {
         let pairs = vec![(3, 4), (4, 3), (2, 5), (1, 3), (3, 9), (3, 3)];
         assert_eq!(part1(&pairs), 11);
+    }
+
+    #[test]
+    fn test_part2() {
+        let pairs = vec![(3, 4), (4, 3), (2, 5), (1, 3), (3, 9), (3, 3)];
+        assert_eq!(part2(&pairs), 31);
     }
 }
