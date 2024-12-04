@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::error::Error;
 
 use aoc_runner_derive::{aoc, aoc_generator};
@@ -29,31 +30,97 @@ enum Safety {
     Unsafe,
 }
 
-fn safety(report: &[u32]) -> Safety {
-    let mut current_sign = None;
-    for pair in report.windows(2) {
-        let diff = pair[1] as i32 - pair[0] as i32;
-        match (current_sign, diff.signum()) {
-            (None, sign) => {
-                current_sign.replace(sign);
+#[derive(Hash, PartialEq, Eq, Copy, Clone, Debug)]
+enum State {
+    Start,
+    Pos(usize, i32, bool),
+    End,
+}
+
+// The approach here is to treat the report as a NFA (non-deterministic finite automaton).
+// This models the possible paths through the report including valid direct transitions
+// and valid transitions that skip one. We maintain a list of states to be explored, starting
+// with the Start state. At each iteration step we replace this list with the list of valid
+// successor states. We stop when we run out of more states to explore (failure) or reach
+// the End state (success). Knowledge of the current direction (if present), and whether we have
+// already used our one skip, is encoded into the states.
+fn report_safety(report: &[u32], skip_enabled: bool) -> Safety {
+    let mut states = vec![State::Start];
+    let mut tmp_states: HashSet<State> = HashSet::new();
+
+    while !states.is_empty() {
+        for state in states.drain(..) {
+            match state {
+                State::Start => {
+                    // We can always start with the first element, or skip to the second.
+                    if !report.is_empty() {
+                        tmp_states.insert(State::Pos(0, 0, false));
+                    }
+                    if report.len() > 1 && skip_enabled {
+                        tmp_states.insert(State::Pos(1, 0, true));
+                    }
+                }
+                State::Pos(i, sign, skipped) => {
+                    let assess_move = |to| {
+                        let delta = report[to] as i32 - report[i] as i32;
+                        let delta_sign = delta.signum();
+                        (
+                            (delta_sign + sign) != 0 && (1..=3).contains(&delta.abs()),
+                            delta_sign,
+                        )
+                    };
+
+                    if i == report.len() - 1 {
+                        // On the last element the only thing we can do is end.
+                        tmp_states.insert(State::End);
+                    } else {
+                        // Otherwise we might be able to move to the next element.
+                        // But only if the direction and magnitude of the movement is valid.
+                        let (valid, new_sign) = assess_move(i + 1);
+                        if valid {
+                            tmp_states.insert(State::Pos(i + 1, new_sign, skipped));
+                        }
+
+                        // If we haven't already skipped, we might be able to skip now.
+                        if !skipped && skip_enabled {
+                            if i == report.len() - 2 {
+                                tmp_states.insert(State::End);
+                            } else {
+                                let (valid, new_sign) = assess_move(i + 2);
+                                if valid {
+                                    tmp_states.insert(State::Pos(i + 2, new_sign, true));
+                                }
+                            }
+                        }
+                    }
+                }
+                State::End => {
+                    // If we reached an end state we found a valid path and can return.
+                    return Safety::Safe;
+                }
             }
-            (Some(cs), sign) if cs != sign => {
-                return Safety::Unsafe;
-            }
-            _ => {}
         }
-        if !(1..=3).contains(&diff.abs()) {
-            return Safety::Unsafe;
-        }
+        states.extend(tmp_states.drain());
     }
-    Safety::Safe
+
+    // If we got here we never managed to reach the end state, so the report was not safe.
+    Safety::Unsafe
 }
 
 #[aoc(day2, part1)]
 pub fn part1(pairs: &[Vec<u32>]) -> usize {
     pairs
         .iter()
-        .map(|r| safety(r))
+        .map(|r| report_safety(r, false))
+        .filter(|s| *s == Safety::Safe)
+        .count()
+}
+
+#[aoc(day2, part2)]
+pub fn part2(pairs: &[Vec<u32>]) -> usize {
+    pairs
+        .iter()
+        .map(|r| report_safety(r, true))
         .filter(|s| *s == Safety::Safe)
         .count()
 }
@@ -89,13 +156,32 @@ mod tests {
     }
 
     #[test]
-    fn test_safety() {
-        assert_eq!(safety(&[7, 6, 4, 2, 1]), Safety::Safe);
-        assert_eq!(safety(&[1, 2, 7, 8, 9]), Safety::Unsafe);
+    fn test_report_safety_without_skipping() {
+        assert_eq!(report_safety(&[7, 6, 4, 2, 1], false), Safety::Safe);
+        assert_eq!(report_safety(&[1, 2, 7, 8, 9], false), Safety::Unsafe);
+        assert_eq!(report_safety(&[9, 7, 6, 2, 1], false), Safety::Unsafe);
+        assert_eq!(report_safety(&[1, 3, 2, 4, 5], false), Safety::Unsafe);
+        assert_eq!(report_safety(&[8, 6, 4, 4, 1], false), Safety::Unsafe);
+        assert_eq!(report_safety(&[1, 3, 6, 7, 9], false), Safety::Safe);
+    }
+
+    #[test]
+    fn test_report_safety_with_skipping() {
+        assert_eq!(report_safety(&[7, 6, 4, 2, 1], true), Safety::Safe);
+        assert_eq!(report_safety(&[1, 2, 7, 8, 9], true), Safety::Unsafe);
+        assert_eq!(report_safety(&[9, 7, 6, 2, 1], true), Safety::Unsafe);
+        assert_eq!(report_safety(&[1, 3, 2, 4, 5], true), Safety::Safe);
+        assert_eq!(report_safety(&[8, 6, 4, 4, 1], true), Safety::Safe);
+        assert_eq!(report_safety(&[1, 3, 6, 7, 9], true), Safety::Safe);
     }
 
     #[test]
     fn test_part1() {
         assert_eq!(part1(&example()), 2);
+    }
+
+    #[test]
+    fn test_part2() {
+        assert_eq!(part2(&example()), 4);
     }
 }
